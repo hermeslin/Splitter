@@ -1,8 +1,11 @@
-var Splitter = artifacts.require("Splitter");
+import { default as Promise } from 'bluebird';
+const Splitter = artifacts.require("Splitter");
+
+Promise.promisifyAll(web3.eth, { suffix: 'Promise' });
 
 const calculateTransactionFee = async (transaction) => {
-  let tx = await web3.eth.getTransaction(transaction.tx);
-  let receipt = await web3.eth.getTransactionReceipt(transaction.tx);
+  let tx = await web3.eth.getTransactionPromise(transaction.tx);
+  let receipt = await web3.eth.getTransactionReceiptPromise(transaction.tx);
   return tx.gasPrice.mul(receipt.gasUsed);
 }
 
