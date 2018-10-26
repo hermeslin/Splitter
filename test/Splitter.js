@@ -52,30 +52,50 @@ contract('Splitter', async (accounts) => {
     assert.equal(remainder, 1);
   })
 
-  it('split amount 10 to two difference address', async () => {
+  it('split 10 weis to two difference address', async () => {
     let splitter = await Splitter.deployed();
 
     let [Alice, Bob, Carol] = accounts;
 
     // initial balance
-    let AliceBalance = await web3.eth.getBalance(Alice);
-    let BobBalance = await web3.eth.getBalance(Bob);
-    let CarolBalance = await web3.eth.getBalance(Carol);
+    let AliceBalance = await web3.eth.getBalancePromise(Alice);
+    let BobBalance = await web3.eth.getBalancePromise(Bob);
+    let CarolBalance = await web3.eth.getBalancePromise(Carol);
 
+    //
     let splitTransaction = await splitter.split(Bob, Carol, { from: Alice, value: 10 });
-    let transactionFee = await calculateTransactionFee(splitTransaction);
+    let splitTransactionFee = await calculateTransactionFee(splitTransaction);
 
-    // final balance
-    let AliceBalanceFinal = await web3.eth.getBalance(Alice);
-    let BobBalanceFinal = await web3.eth.getBalance(Bob);
-    let CarolBalanceFinal = await web3.eth.getBalance(Carol);
+    // Alice balance
+    let AliceBalanceFinal = await web3.eth.getBalancePromise(Alice);
+    assert.equal(AliceBalanceFinal.plus(splitTransactionFee).plus(10).toString(), AliceBalance.toString());
 
-    assert.equal(AliceBalanceFinal.plus(transactionFee).plus(10).toString(), AliceBalance.toString());
-    assert.equal(BobBalanceFinal.minus(BobBalance).toString(), '5');
-    assert.equal(CarolBalanceFinal.minus(CarolBalance).toString(), '5');
+    // Bob and Carol should has 5 weis, but store in smart contract state
+    let BobBalanceState = await splitter.getBalance(Bob);
+    assert.equal(5, BobBalanceState);
+
+    let CarolBalanceState = await splitter.getBalance(Carol);
+    assert.equal(5, CarolBalanceState);
+
+    // after withdraw, Bob and Carol can take their money back
+    let BobWithdrawSimulate = await splitter.withdraw.call({ from: Bob });
+    assert.equal(true, BobWithdrawSimulate);
+
+    let BobWithdrawTransaction = await splitter.withdraw({ from: Bob });
+    let BobWithdrawTransactionFee = await calculateTransactionFee(BobWithdrawTransaction);
+    let BobBalanceFinal = await web3.eth.getBalancePromise(Bob);
+    assert.equal(BobBalanceFinal.plus(BobWithdrawTransactionFee).minus(BobBalance).abs().toString(), '5');
+
+    let CarolWithdrawSimulate = await splitter.withdraw.call({ from: Carol });
+    assert.equal(true, CarolWithdrawSimulate);
+
+    let CarolWithdrawTransaction = await splitter.withdraw({ from: Carol });
+    let CarolWithdrawTransactionFee = await calculateTransactionFee(CarolWithdrawTransaction);
+    let CarolBalanceFinal = await web3.eth.getBalancePromise(Carol);
+    assert.equal(CarolBalanceFinal.plus(CarolWithdrawTransactionFee).minus(CarolBalance).toString(), '5');
   })
 
-  it('split amount 9 to two difference address', async () => {
+  it('split 9 weis to two difference address', async () => {
     let splitter = await Splitter.deployed();
 
     let [Alice, Bob, Carol] = accounts;
@@ -85,17 +105,37 @@ contract('Splitter', async (accounts) => {
     let BobBalance = await web3.eth.getBalance(Bob);
     let CarolBalance = await web3.eth.getBalance(Carol);
 
+    //
     let splitTransaction = await splitter.split(Bob, Carol, { from: Alice, value: 9 });
-    let transactionFee = await calculateTransactionFee(splitTransaction);
+    let splitTransactionFee = await calculateTransactionFee(splitTransaction);
 
-    // final balance
-    let AliceBalanceFinal = await web3.eth.getBalance(Alice);
-    let BobBalanceFinal = await web3.eth.getBalance(Bob);
-    let CarolBalanceFinal = await web3.eth.getBalance(Carol);
+    // Alice balance
+    let AliceBalanceFinal = await web3.eth.getBalancePromise(Alice);
+    assert.equal(AliceBalanceFinal.plus(splitTransactionFee).plus(8).toString(), AliceBalance.toString());
 
-    // actually, alice sent 8 weis to other address
-    assert.equal(AliceBalanceFinal.plus(transactionFee).plus(8).toString(), AliceBalance.toString());
-    assert.equal(BobBalanceFinal.minus(BobBalance).toString(), '4');
-    assert.equal(CarolBalanceFinal.minus(CarolBalance).toString(), '4');
+    // actually, Alice sent 8 weis to other address
+    // so, Bob and Carol should has 4 weis, but store in smart contract state
+    let BobBalanceState = await splitter.getBalance(Bob);
+    assert.equal(4, BobBalanceState);
+
+    let CarolBalanceState = await splitter.getBalance(Carol);
+    assert.equal(4, CarolBalanceState);
+
+    // after withdraw, Bob and Carol can take their money back
+    let BobWithdrawSimulate = await splitter.withdraw.call({ from: Bob });
+    assert.equal(true, BobWithdrawSimulate);
+
+    let BobWithdrawTransaction = await splitter.withdraw({ from: Bob });
+    let BobWithdrawTransactionFee = await calculateTransactionFee(BobWithdrawTransaction);
+    let BobBalanceFinal = await web3.eth.getBalancePromise(Bob);
+    assert.equal(BobBalanceFinal.plus(BobWithdrawTransactionFee).minus(BobBalance).abs().toString(), '4');
+
+    let CarolWithdrawSimulate = await splitter.withdraw.call({ from: Carol });
+    assert.equal(true, CarolWithdrawSimulate);
+
+    let CarolWithdrawTransaction = await splitter.withdraw({ from: Carol });
+    let CarolWithdrawTransactionFee = await calculateTransactionFee(CarolWithdrawTransaction);
+    let CarolBalanceFinal = await web3.eth.getBalancePromise(Carol);
+    assert.equal(CarolBalanceFinal.plus(CarolWithdrawTransactionFee).minus(CarolBalance).toString(), '4');
   })
 })
