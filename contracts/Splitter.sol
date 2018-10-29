@@ -11,7 +11,7 @@ contract Splitter {
     ) balances;
 
     function amountCheck(uint amount) public pure returns (bool) {
-        return (amount > 0) ? true : false;
+        return (amount > 0);
     }
 
     function getDivided(uint numerator, uint denominator) public pure returns (uint quotient, uint remainder) {
@@ -21,13 +21,11 @@ contract Splitter {
     }
 
     function split(address receiverA, address receiverB) public payable returns (bool) {
-        uint amount = msg.value;
-
-        require(amountCheck(amount), "amount should great than zero");
+        require(amountCheck(msg.value), "amount should great than zero");
 
         uint quotient;
         uint remainder;
-        (quotient, remainder) = getDivided(amount, 2);
+        (quotient, remainder) = getDivided(msg.value, 2);
 
         // store receiver balance in smart contract state
         // when receiver calls withdraw, they can take their own balance back
@@ -43,12 +41,10 @@ contract Splitter {
     }
 
     function withdraw() public returns (bool) {
-        address receiver = msg.sender;
-
-        uint balance = balances[receiver];
+        uint balance = balances[msg.sender];
         require (balance > 0, "reciever has no balance to withdraw");
 
-        balances[receiver] = 0;
+        balances[msg.sender] = 0;
         msg.sender.transfer(balance);
 
         return true;
