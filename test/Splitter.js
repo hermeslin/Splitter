@@ -5,137 +5,235 @@ Promise.promisifyAll(web3.eth, { suffix: 'Promise' });
 
 const calculateTransactionFee = async (transaction) => {
   let tx = await web3.eth.getTransactionPromise(transaction.tx);
-  let receipt = await web3.eth.getTransactionReceiptPromise(transaction.tx);
-  return tx.gasPrice.mul(receipt.gasUsed);
+  return tx.gasPrice.mul(transaction.receipt.gasUsed);
 }
 
 contract('Splitter', async (accounts) => {
 
-  it ('receive hello world string', async () => {
-    let splitter = await Splitter.deployed();
-    let result = await splitter.say.call('hello world');
-    assert.equal(result, 'hello world');
-  })
+  const [alice, bob, carol] = accounts;
+  let splitter;
 
-  it ('amount should great than zero', async () => {
-    let splitter = await Splitter.deployed();
-
-    let falseResult = await splitter.amountCheck.call(0);
-    assert.equal(falseResult, false);
-
-    let trueResult = await splitter.amountCheck.call(1);
-    assert.equal(trueResult, true);
+  beforeEach('Deploy new contract instance', async () => {
+    splitter = await Splitter.new({ from: alice });
   });
 
-  it ('divided should correct', async () => {
-    let splitter = await Splitter.deployed();
-    let quotient, remainder;
+  describe('.amountCheck(): check amount should great than zero', async () => {
+    //
+    let dataProvider = {
+      'should be false when give 0': {
+        data: {
+          amount: 0
+        },
+        expected: false
+      },
+      'should be true when give 1': {
+        data: {
+          amount: 1
+        },
+        expected: true
+      }
+    };
 
-    [quotient, remainder] = await splitter.getDivided.call(1, 2);
-    assert.equal(quotient, 0);
-    assert.equal(remainder, 1);
+    // testing all test case data
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let result = await splitter.amountCheck.call(testCase.data.amount);
+        assert.equal(result, testCase.expected);
+      });
+    }
+  });
 
-    [quotient, remainder ] = await splitter.getDivided.call(2, 2);
-    assert.equal(quotient, 1);
-    assert.equal(remainder, 0);
+  describe('.getDivided(): calculate how many numbers that sender can take them back', async () => {
+    //
+    let dataProvider = {
+      'should calculate sender can take 1 back, and others can get 0': {
+        data: {
+          amount: 1,
+          divide: 2
+        },
+        expected: {
+          quotient: 0,
+          remainder: 1
+        }
+      },
+      'should calculate sender can take 0 back, and others can get 1': {
+        data: {
+          amount: 2,
+          divide: 2
+        },
+        expected: {
+          quotient: 1,
+          remainder: 0
+        }
+      }
+    };
 
-    [quotient, remainder] = await splitter.getDivided.call(3, 2);
-    assert.equal(quotient, 1);
-    assert.equal(remainder, 1);
+    // testing all test case
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let quotient, remainder;
+        [quotient, remainder] = await splitter.getDivided.call(testCase.data.amount, testCase.data.divide);
 
-    [quotient, remainder] = await splitter.getDivided.call(4, 2);
-    assert.equal(quotient, 2);
-    assert.equal(remainder, 0);
+        assert.equal(quotient, testCase.expected.quotient);
+        assert.equal(remainder, testCase.expected.remainder);
+      });
+    }
+  });
 
-    [quotient, remainder] = await splitter.getDivided.call(5, 2);
-    assert.equal(quotient, 2);
-    assert.equal(remainder, 1);
+  describe('.split(): sender send some weis and expend some gas', async () => {
+    let dataProvider = {
+      'alice should send 10 weis': {
+        data: {
+          amount: 10,
+        },
+        expected: {
+          simulate: true,
+          exactlySend: 10
+        }
+      },
+      'alice should send 8 weis': {
+        data: {
+          amount: 9,
+        },
+        expected: {
+          simulate: true,
+          exactlySend: 8
+        }
+      },
+    };
+
+    // testing all test case
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let simulate = await splitter.split.call(bob, carol, { from: alice, value: testCase.data.amount });
+        assert.equal(simulate, testCase.expected.simulate);
+
+        let aliceBalance = await web3.eth.getBalancePromise(alice);
+        let splitTransaction = await splitter.split(bob, carol, { from: alice, value: testCase.data.amount });
+        let splitTransactionFee = await calculateTransactionFee(splitTransaction);
+        let aliceBalanceFinal = await web3.eth.getBalancePromise(alice);
+        assert.equal(aliceBalanceFinal.plus(splitTransactionFee).plus(testCase.expected.exactlySend).toString(), aliceBalance.toString());
+      });
+    }
   })
 
-  it('split 10 weis to two difference address', async () => {
-    let splitter = await Splitter.deployed();
+  describe('.getBalance(): receiver get their balance that store in the contract', async () => {
+    let dataProvider = {
+      'receiver has 5 weis that store in the contract ': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 10,
+        },
+        expected: {
+          storeInContract: 5,
+        }
+      },
+      'receiver has 4 weis that store in the contract ': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 9,
+        },
+        expected: {
+          storeInContract: 4,
+        }
+      }
+    };
+    // testing all test case
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let [bob, carol] = testCase.data.receivers;
+        await splitter.split(bob, carol, { from: alice, value: testCase.data.aliceSendAmount });
 
-    let [Alice, Bob, Carol] = accounts;
+        // check every receivers
+        testCase.data.receivers.forEach(async function(receiver) {
+          let receiverBalanceState = await splitter.getBalance(receiver);
+          assert.equal(receiverBalanceState, testCase.expected.storeInContract);
+        });
+      });
+    }
+  });
 
-    // initial balance
-    let AliceBalance = await web3.eth.getBalancePromise(Alice);
-    let BobBalance = await web3.eth.getBalancePromise(Bob);
-    let CarolBalance = await web3.eth.getBalancePromise(Carol);
+  describe('.withdraw.call(): receiver simulate withdraw', async () => {
+    let dataProvider = {
+      'simulate withdraw should be true when send 10 weis': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 10,
+        },
+        expected: {
+          simulate: true,
+        }
+      },
+      'simulate withdraw should be true when send 9 weis ': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 9,
+        },
+        expected: {
+          simulate: true,
+        }
+      },
+    };
 
-    //
-    let splitTransaction = await splitter.split(Bob, Carol, { from: Alice, value: 10 });
-    let splitTransactionFee = await calculateTransactionFee(splitTransaction);
+    // testing all test case data
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let [bob, carol] = testCase.data.receivers;
+        await splitter.split(bob, carol, { from: alice, value: testCase.data.aliceSendAmount });
 
-    // Alice balance
-    let AliceBalanceFinal = await web3.eth.getBalancePromise(Alice);
-    assert.equal(AliceBalanceFinal.plus(splitTransactionFee).plus(10).toString(), AliceBalance.toString());
+        // check every receivers
+        testCase.data.receivers.forEach(async function(receiver) {
+          let simulate = await splitter.withdraw.call({ from: receiver });
+          assert.equal(simulate, testCase.expected.simulate);
+        });
+      });
+    }
+  });
 
-    // Bob and Carol should has 5 weis, but store in smart contract state
-    let BobBalanceState = await splitter.getBalance(Bob);
-    assert.equal(5, BobBalanceState);
+  describe('.withdraw(): receivers should get weis via invoke withdraw and expend some gas', async () => {
+    let dataProvider = {
+      'should receive 5 weis and expend some gas': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 10,
+        },
+        expected: {
+          exactlyGet: 5
+        }
+      },
+      'should receive 4 weis and expend some gas': {
+        data: {
+          receivers: [bob, carol],
+          aliceSendAmount: 9,
+        },
+        expected: {
+          exactlyGet: 4
+        }
+      }
+    };
 
-    let CarolBalanceState = await splitter.getBalance(Carol);
-    assert.equal(5, CarolBalanceState);
+    // testing all test case
+    for (let [describe, testCase] of Object.entries(dataProvider)) {
+      it(describe, async function () {
+        let [bob, carol] = testCase.data.receivers;
+        await splitter.split(bob, carol, { from: alice, value: testCase.data.aliceSendAmount });
 
-    // after withdraw, Bob and Carol can take their money back
-    let BobWithdrawSimulate = await splitter.withdraw.call({ from: Bob });
-    assert.equal(true, BobWithdrawSimulate);
+        // check every receivers
+        testCase.data.receivers.forEach(async function(receiver) {
+          let receiverBalance = await web3.eth.getBalancePromise(receiver);
+          let receiverWithdrawTransaction = await splitter.withdraw({ from: receiver });
+          let receiverWithdrawTransactionFee = await calculateTransactionFee(receiverWithdrawTransaction);
+          let receiverBalanceFinal = await web3.eth.getBalancePromise(receiver);
+          assert.equal(receiverBalanceFinal.plus(receiverWithdrawTransactionFee).minus(receiverBalance).abs().toString(), testCase.expected.exactlyGet);
+        });
+      });
+    }
+  });
 
-    let BobWithdrawTransaction = await splitter.withdraw({ from: Bob });
-    let BobWithdrawTransactionFee = await calculateTransactionFee(BobWithdrawTransaction);
-    let BobBalanceFinal = await web3.eth.getBalancePromise(Bob);
-    assert.equal(BobBalanceFinal.plus(BobWithdrawTransactionFee).minus(BobBalance).abs().toString(), '5');
-
-    let CarolWithdrawSimulate = await splitter.withdraw.call({ from: Carol });
-    assert.equal(true, CarolWithdrawSimulate);
-
-    let CarolWithdrawTransaction = await splitter.withdraw({ from: Carol });
-    let CarolWithdrawTransactionFee = await calculateTransactionFee(CarolWithdrawTransaction);
-    let CarolBalanceFinal = await web3.eth.getBalancePromise(Carol);
-    assert.equal(CarolBalanceFinal.plus(CarolWithdrawTransactionFee).minus(CarolBalance).toString(), '5');
-  })
-
-  it('split 9 weis to two difference address', async () => {
-    let splitter = await Splitter.deployed();
-
-    let [Alice, Bob, Carol] = accounts;
-
-    // initial balance
-    let AliceBalance = await web3.eth.getBalance(Alice);
-    let BobBalance = await web3.eth.getBalance(Bob);
-    let CarolBalance = await web3.eth.getBalance(Carol);
-
-    //
-    let splitTransaction = await splitter.split(Bob, Carol, { from: Alice, value: 9 });
-    let splitTransactionFee = await calculateTransactionFee(splitTransaction);
-
-    // Alice balance
-    let AliceBalanceFinal = await web3.eth.getBalancePromise(Alice);
-    assert.equal(AliceBalanceFinal.plus(splitTransactionFee).plus(8).toString(), AliceBalance.toString());
-
-    // actually, Alice sent 8 weis to other address
-    // so, Bob and Carol should has 4 weis, but store in smart contract state
-    let BobBalanceState = await splitter.getBalance(Bob);
-    assert.equal(4, BobBalanceState);
-
-    let CarolBalanceState = await splitter.getBalance(Carol);
-    assert.equal(4, CarolBalanceState);
-
-    // after withdraw, Bob and Carol can take their money back
-    let BobWithdrawSimulate = await splitter.withdraw.call({ from: Bob });
-    assert.equal(true, BobWithdrawSimulate);
-
-    let BobWithdrawTransaction = await splitter.withdraw({ from: Bob });
-    let BobWithdrawTransactionFee = await calculateTransactionFee(BobWithdrawTransaction);
-    let BobBalanceFinal = await web3.eth.getBalancePromise(Bob);
-    assert.equal(BobBalanceFinal.plus(BobWithdrawTransactionFee).minus(BobBalance).abs().toString(), '4');
-
-    let CarolWithdrawSimulate = await splitter.withdraw.call({ from: Carol });
-    assert.equal(true, CarolWithdrawSimulate);
-
-    let CarolWithdrawTransaction = await splitter.withdraw({ from: Carol });
-    let CarolWithdrawTransactionFee = await calculateTransactionFee(CarolWithdrawTransaction);
-    let CarolBalanceFinal = await web3.eth.getBalancePromise(Carol);
-    assert.equal(CarolBalanceFinal.plus(CarolWithdrawTransactionFee).minus(CarolBalance).toString(), '4');
+  describe('.say(): hello world test', async () => {
+    it('receive hello world string', async () => {
+      let result = await splitter.say.call('hello world');
+      assert.equal(result, 'hello world');
+    })
   })
 })
